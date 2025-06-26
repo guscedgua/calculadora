@@ -2,9 +2,10 @@
 import api from './axios';
 import { showToast } from '../components/ui/Toast';
 
+// Todas las funciones deben usar rutas que comiencen con '/api/'
 export const createOrder = async (orderData) => {
   try {
-    const response = await api.post('/orders', orderData);
+    const response = await api.post('/api/orders', orderData); // Añadido /api/
     showToast('Orden creada correctamente', 'success');
     return response.data;
   } catch (error) {
@@ -22,7 +23,7 @@ export const createOrder = async (orderData) => {
 
 export const getOrderById = async (orderId) => {
   try {
-    const response = await api.get(`/orders/${orderId}`);
+    const response = await api.get(`/api/orders/${orderId}`); // Añadido /api/
     return response.data;
   } catch (error) {
     console.error('Error fetching order:', error);
@@ -39,7 +40,7 @@ export const getOrderById = async (orderId) => {
 
 export const updateOrderStatus = async (orderId, status) => {
   try {
-    const response = await api.patch(`/orders/${orderId}/status`, { status });
+    const response = await api.patch(`/api/orders/${orderId}/status`, { status }); // Añadido /api/
     showToast('Estado actualizado correctamente', 'success');
     return response.data;
   } catch (error) {
@@ -57,7 +58,7 @@ export const updateOrderStatus = async (orderId, status) => {
 
 export const deleteOrder = async (orderId) => {
   try {
-    await api.delete(`/orders/${orderId}`);
+    await api.delete(`/api/orders/${orderId}`); // Añadido /api/
     showToast('Orden eliminada correctamente', 'success');
     return true;
   } catch (error) {
@@ -75,7 +76,7 @@ export const deleteOrder = async (orderId) => {
 
 export const getOrders = async (params = {}) => {
   try {
-    const response = await api.get('/orders', { params });
+    const response = await api.get('/api/orders', { params }); // Añadido /api/
     return response.data;
   } catch (error) {
     console.error('Error fetching orders:', error);

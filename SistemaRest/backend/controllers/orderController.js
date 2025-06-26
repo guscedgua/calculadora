@@ -689,3 +689,37 @@ export const markOrderPaid = async (req, res) => {
     });
   }
 };
+export const getTodaySummary = async (req, res) => {
+  try {
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const orders = await Order.find({
+      createdAt: { $gte: startOfDay, $lte: endOfDay },
+      status: { $ne: 'cancelled' } // Excluir órdenes canceladas
+    });
+
+    const total = orders.reduce((sum, order) => sum + order.totalAmount, 0);
+    const count = orders.length;
+
+    res.json({ 
+      success: true,
+      total,
+      count,
+      orders: orders.map(o => ({
+        _id: o._id,
+        orderNumber: o.orderNumber,
+        totalAmount: o.totalAmount
+      }))
+    });
+  } catch (error) {
+    console.error('Error al obtener resumen diario:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error interno del servidor'
+    });
+  }
+};

@@ -4,7 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { SettingsProvider } from './context/SettingsContext';
 import DashboardLayout from './components/layout/DashboardLayout';
-import RestaurantLogin from './pages/auth/Login'; // Importación corregida
+import RestaurantLogin from './pages/auth/Login'; 
 import Register from './pages/auth/Register';
 import OrdersList from './pages/orders/OrdersList';
 import OrderDetail from './pages/orders/OrderDetail';
@@ -21,47 +21,33 @@ import PrivateRoute from './routes/PrivateRoute';
 import AdminRoute from './routes/AdminRoute';
 import './index.css';
 
-// Importa el componente de tu dashboard principal.
-// Asegúrate de crear este archivo si no existe.
 import Dashboard from './pages/dashboard/Dashboard'; 
 
 console.log("¡Este mensaje DEBE aparecer si el frontend se carga!");
 
 function App() {
   return (
-    <AuthProvider>
-      <SettingsProvider>
-        <BrowserRouter>
+    // CORRECCIÓN: BrowserRouter debe ser el contenedor PRINCIPAL
+    <BrowserRouter>
+      <AuthProvider>
+        <SettingsProvider>
           <Routes>
-            {/* Rutas Públicas (accesibles sin autenticación) */}
+            {/* Rutas Públicas */}
             <Route path="/login" element={<RestaurantLogin />} /> 
             <Route path="/register" element={<Register />} />
             <Route path="/unauthorized" element={<Unauthorized />} />
 
-            {/* Rutas Protegidas que usan DashboardLayout.
-                La PrivateRoute se encarga de verificar la autenticación.
-                Si no está autenticado, PrivateRoute DEBE redirigir a /login.
-                Si está autenticado, se renderiza el DashboardLayout y sus rutas anidadas.
-            */}
+            {/* Rutas Protegidas */}
             <Route element={<PrivateRoute />}>
               <Route path="/" element={<DashboardLayout />}>
-                {/* Ruta index: Se renderiza cuando la ruta es exactamente "/" o "/dashboard"
-                    (si DashboardLayout es el elemento de la ruta principal "/").
-                */}
                 <Route index element={<Dashboard />} />
-                <Route path="dashboard" element={<Dashboard />} /> {/* Ruta explícita para /dashboard */}
-                
-                {/* Rutas de Órdenes (anidadas y relativas a la ruta padre "/") */}
+                <Route path="dashboard" element={<Dashboard />} /> 
                 <Route path="orders" element={<OrdersList />} />
                 <Route path="orders/:id" element={<OrderDetail />} />
                 <Route path="orders/new" element={<CreateOrder />} />
-
-                {/* Rutas de Mesas (anidadas y relativas a la ruta padre "/") */}
                 <Route path="tables" element={<TablesPage />} />
 
-                {/* Rutas para Administradores (anidadas dentro de DashboardLayout y protegidas por AdminRoute).
-                    Estas también son relativas a la ruta padre ("/").
-                */}
+                {/* Rutas de Administrador */}
                 <Route element={<AdminRoute />}>
                   <Route path="products" element={<ProductsList />} />
                   <Route path="products/:id" element={<ProductEdit />} />
@@ -72,16 +58,13 @@ function App() {
               </Route>
             </Route>
 
-            {/* Rutas para manejo de errores y rutas no encontradas.
-                La redirección por defecto a /login ya no es necesaria aquí si PrivateRoute maneja la lógica.
-                Esta ruta catch-all solo se activará si ninguna ruta anterior (incluyendo las públicas y las protegidas vía PrivateRoute) coincide.
-            */}
+            {/* Manejo de errores */}
             <Route path="/404" element={<NotFound />} />
             <Route path="*" element={<Navigate to="/404" replace />} />
           </Routes>
-        </BrowserRouter>
-      </SettingsProvider>
-    </AuthProvider>
+        </SettingsProvider>
+      </AuthProvider>
+    </BrowserRouter> // ← BrowserRouter ahora envuelve TODO
   );
 }
 

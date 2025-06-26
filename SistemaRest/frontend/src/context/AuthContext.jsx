@@ -1,146 +1,128 @@
-// src/context/AuthContext.js
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import axios from 'axios';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { loginUser, logoutUser, refreshToken as apiRefreshToken } from '../api/auth';
+import axiosInstance from '../api/axios';
 
-const AuthContext = createContext();
-
-// Hook personalizado para consumir el contexto de autenticación
-export const useAuth = () => {
-  return useContext(AuthContext);
-};
+const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
-  // Obtener el estado inicial del usuario y el token del localStorage
-  const [user, setUser] = useState(() => {
-    try {
-      const storedUser = localStorage.getItem('user');
-      return storedUser ? JSON.parse(storedUser) : null;
-    } catch (error) {
-      console.error("Error parsing user from localStorage:", error);
-      return null;
-    }
-  });
+    const [user, setUser] = useState(null);
+    const [isAuthenticated, setIsAuthenticated] = useState(false);
+    const [loading, setLoading] = useState(true);
 
-  const [token, setToken] = useState(() => {
-    return localStorage.getItem('token') || null;
-  });
+    const login = useCallback(async (email, password) => {
+        try {
+            const { user: userData, accessToken, refreshToken } = await loginUser({ email, password });
 
-  const [isAuthenticated, setIsAuthenticated] = useState(!!user && !!token);
-  const [isLoading, setIsLoading] = useState(true); // Para manejar el estado de carga inicial si es necesario
+            localStorage.setItem('token', accessToken);
+            localStorage.setItem('refreshToken', refreshToken);
+            localStorage.setItem('user', JSON.stringify(userData));
 
-  const API_URL = import.meta.env.VITE_API_URL; // Asegúrate de que esta variable de entorno esté disponible
+            axiosInstance.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
 
-  useEffect(() => {
-    // Cuando user o token cambian, actualiza isAuthenticated
-    setIsAuthenticated(!!user && !!token);
-    // Podrías añadir lógica para verificar el token en el backend aquí si es necesario
-    // Por ejemplo, para refrescar el token o validar si sigue siendo válido al cargar la app
-    setIsLoading(false); // Una vez que el estado inicial se ha cargado, deja de cargar
-  }, [user, token]);
+            setUser(userData);
+            setIsAuthenticated(true);
+            
+            return sessionStorage.getItem('redirectPath') || '/orders';
 
-  // Función de inicio de sesión
-  const login = async (email, password) => {
-    try {
-      const response = await axios.post(
-        `${API_URL}/auth/login`,
-        { email, password },
-        {
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          withCredentials: true // IMPORTANTE para manejar cookies de sesión
+        } catch (error) {
+            console.error('Error en AuthContext login:', error);
+            throw error; 
         }
-      );
+    }, []);
 
-      const responseData = response.data;
-
-      // Verificar si la respuesta tiene la estructura esperada
-      if (!responseData.success) {
-        throw new Error(responseData.message || 'Error desconocido en el inicio de sesión');
-      }
-
-      const accessToken = responseData.accessToken || responseData.token;
-      const userData = responseData.user || {
-        id: responseData.id,
-        name: responseData.name,
-        email: responseData.email,
-        role: responseData.role
-      };
-
-      if (!accessToken || !userData) {
-        throw new Error('Faltan datos esenciales en la respuesta del servidor');
-      }
-
-      // Actualizar el estado del contexto
-      setUser(userData);
-      setToken(accessToken);
-
-      // Guardar en localStorage para persistencia
-      localStorage.setItem('user', JSON.stringify(userData));
-      localStorage.setItem('token', accessToken);
-
-      // Puedes retornar algo si el componente que llama necesita saber el éxito
-      return { success: true, message: 'Inicio de sesión exitoso' };
-
-    } catch (err) {
-      // Manejo de errores detallado
-      let errorMessage = 'Error al iniciar sesión. Verifica tus credenciales.';
-
-      if (axios.isAxiosError(err)) { // Verifica si es un error de Axios
-        if (err.response) {
-          // El servidor respondió con un estado fuera del rango 2xx
-          if (err.response.data && err.response.data.message) {
-            errorMessage = err.response.data.message;
-          } else if (err.response.status === 401) {
-            errorMessage = 'Credenciales inválidas. Por favor, verifica.';
-          } else if (err.response.status === 400 && err.response.data.errors) {
-            errorMessage = err.response.data.errors.join(', ');
-          } else {
-            errorMessage = `Error del servidor: ${err.response.status} - ${err.response.statusText}`;
-          }
-        } else if (err.request) {
-          // La solicitud fue hecha pero no se recibió respuesta
-          errorMessage = 'No se recibió respuesta del servidor. Verifica tu conexión a internet o la disponibilidad del backend.';
-        } else {
-          // Algo más causó el error
-          errorMessage = `Error en la configuración de la solicitud: ${err.message}`;
+    const logout = useCallback(async () => {
+        try {
+            await logoutUser();
+        } catch (error) {
+            console.error('Error en AuthContext logout:', error);
+        } finally {
+            localStorage.removeItem('token');
+            localStorage.removeItem('refreshToken');
+            localStorage.removeItem('user');
+            axiosInstance.defaults.headers.common['Authorization'] = '';
+            setUser(null);
+            setIsAuthenticated(false);
         }
-      } else {
-        // Error no relacionado con Axios
-        errorMessage = err.message || 'Ocurrió un error inesperado.';
-      }
-      
-      console.error('Error en login (AuthContext):', err);
-      // Propagar el error para que el componente que llama lo pueda manejar
-      throw new Error(errorMessage);
+        return '/login';
+    }, []);
+
+    useEffect(() => {
+        let isMounted = true; // Bandera para controlar el estado montado
+        
+        const verifyAuth = async () => {
+            const storedToken = localStorage.getItem('token');
+            const storedUser = localStorage.getItem('user');
+            const storedRefreshToken = localStorage.getItem('refreshToken');
+
+            if (storedToken && storedUser) {
+                axiosInstance.defaults.headers.common['Authorization'] = `Bearer ${storedToken}`;
+                try {
+                    await axiosInstance.get('/api/auth/profile');
+                    
+                    if (isMounted) {
+                        setUser(JSON.parse(storedUser));
+                        setIsAuthenticated(true);
+                    }
+                } catch (error) {
+                    if (error.response?.status === 401 || error.response?.status === 403) {
+                         console.log("Token inválido o expirado. Forzando logout.");
+                         await logout();
+                         window.location.href = '/login';
+                    }
+                }
+            } else if (storedRefreshToken) {
+                try {
+                    const { accessToken } = await apiRefreshToken(storedRefreshToken);
+                    localStorage.setItem('token', accessToken);
+                    axiosInstance.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
+                    
+                    if (isMounted) {
+                        setUser(JSON.parse(storedUser));
+                        setIsAuthenticated(true);
+                    }
+                } catch (refreshErr) {
+                    console.error('Error al refrescar token:', refreshErr);
+                    await logout();
+                    window.location.href = '/login';
+                }
+            } else {
+                // Solo muestra en desarrollo para evitar ruido en producción
+                if (process.env.NODE_ENV === 'development') {
+                    console.log('No se encontraron tokens de autenticación. Usuario no autenticado.');
+                }
+            }
+            
+            if (isMounted) {
+                setLoading(false);
+            }
+        };
+
+        verifyAuth();
+
+        return () => {
+            isMounted = false; // Limpiar al desmontar
+        };
+    }, [logout]);
+
+    const authContextValue = {
+        user,
+        isAuthenticated,
+        loading,
+        login,
+        logout,
+    };
+
+    return (
+        <AuthContext.Provider value={authContextValue}>
+            {children}
+        </AuthContext.Provider>
+    );
+};
+
+export const useAuth = () => {
+    const context = useContext(AuthContext);
+    if (!context) {
+        throw new Error('useAuth must be used within an AuthProvider');
     }
-  };
-
-  // Función de cierre de sesión
-  const logout = () => {
-    setUser(null);
-    setToken(null);
-    localStorage.removeItem('user');
-    localStorage.removeItem('token');
-    // Si usas cookies de sesión, podrías necesitar una llamada al backend para invalidarlas
-    // axios.post(`${API_URL}/auth/logout`); // Ejemplo
-  };
-
-  const value = {
-    user,
-    token,
-    isAuthenticated,
-    isLoading, // Incluir el estado de carga si lo usas para mostrar un spinner global
-    login,
-    logout,
-  };
-
-  // Asegúrate de que isLoading se use correctamente. Podrías renderizar un spinner
-  // aquí en el proveedor si quieres que toda la aplicación espere a que se cargue
-  // el estado de autenticación inicial.
-  // if (isLoading) {
-  //   return <Spinner />; // Necesitarías importar o definir Spinner aquí
-  // }
-
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+    return context;
 };

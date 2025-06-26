@@ -134,7 +134,8 @@ export const login = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role
-      }
+      },
+      accessToken: accessToken
     };
 
     // SI EL USUARIO ES UN ADMINISTRADOR, INCLUIR EL ACCESSTOKEN EN EL CUERPO DE LA RESPUESTA
@@ -178,74 +179,6 @@ export const logout = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error en el servidor al cerrar sesión',
-      systemError: process.env.NODE_ENV === 'development' ? error.message : null,
-    });
-  }
-};
-
-export const refreshToken = async (req, res) => {
-  try {
-    let incomingRefreshToken = req.body.refreshToken; // Obtener el token del cuerpo de la solicitud
-
-    if (!incomingRefreshToken) {
-      // Si el token no viene en el cuerpo, intentar de las cookies
-      if (req.cookies.refreshToken) {
-        incomingRefreshToken = req.cookies.refreshToken;
-      } else {
-        return res.status(400).json({ success: false, message: 'Refresh token no proporcionado.' });
-      }
-    }
-
-    // Verificar si el token de refresco existe y no está revocado
-    const storedRefreshToken = await RefreshToken.findOne({ token: incomingRefreshToken, revoked: false });
-
-    if (!storedRefreshToken) {
-      return res.status(403).json({ success: false, message: 'Refresh token inválido o revocado.' });
-    }
-
-    // Verificar el token de refresco
-    const decoded = jwt.verify(storedRefreshToken, process.env.REFRESH_TOKEN_SECRET);
-
-    // Si el token está expirado pero no ha sido revocado en DB, marcarlo como revocado
-    if (decoded.exp * 1000 < Date.now()) {
-      storedRefreshToken.revoked = true;
-      await storedRefreshToken.save();
-      return res.status(403).json({ success: false, message: 'Refresh token expirado. Por favor, inicie sesión de nuevo.' });
-    }
-
-    // Buscar el usuario asociado al token de refresco
-    const user = await User.findById(decoded.userId);
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'Usuario no encontrado asociado al refresh token.' });
-    }
-
-    // Asegurarse de que la sesión en el token de refresco coincide con la sesión actual del usuario
-    if (decoded.sessionId && user.sessionId !== decoded.sessionId) {
-      // Revocar este refresh token si la sesión no coincide
-      storedRefreshToken.revoked = true;
-      await storedRefreshToken.save();
-      console.warn(`[AUTH] Sesión no coincide para user ${user._id} durante refresh. Revocando refresh token.`);
-      return res.status(403).json({ success: false, message: 'Sesión de refresh token inválida. Por favor, inicie sesión de nuevo.' });
-    }
-
-    // Generar un nuevo token de acceso
-    const newAccessToken = generateAccessToken(user, decoded.sessionId); // Usa la sessionId del refresh token
-
-    // No generamos un nuevo refresh token aquí a menos que el antiguo esté a punto de expirar
-    // o para rotación de tokens (más avanzado). Por simplicidad, solo un nuevo access token.
-
-    res.json({ success: true, accessToken: newAccessToken });
-
-  } catch (error) {
-    console.error('Error refreshing token:', error);
-
-    // Si el error es de verificación de JWT (ej. signature mismatch)
-    if (error.name === 'JsonWebTokenError') {
-      return res.status(403).json({ success: false, message: 'Refresh token inválido (error de firma o formato).' });
-    }
-    res.status(500).json({
-      success: false,
-      message: 'Error interno del servidor al refrescar token.',
       systemError: process.env.NODE_ENV === 'development' ? error.message : null,
     });
   }

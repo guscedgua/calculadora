@@ -9,7 +9,7 @@ const axiosInstance = axios.create({
   }
 });
 
-// Estado para manejar refresco de token run
+// Estado para manejar refresco de token
 let isRefreshing = false;
 let failedRequests = [];
 
@@ -79,11 +79,10 @@ axiosInstance.interceptors.response.use(
         throw new Error('No refresh token available');
       }
       
-      // Solicitar nuevo token
-      const response = await axios.post(
-        `${import.meta.env.VITE_API_URL}/auth/refresh-token`,
-        { refreshToken },
-        { withCredentials: true }
+      // Solicitar nuevo token usando la misma instancia
+      const response = await axiosInstance.post(
+        '/auth/refresh-token',
+        { refreshToken } // Envía el refresh token en el cuerpo
       );
 
       const { accessToken, refreshToken: newRefreshToken } = response.data;
@@ -99,7 +98,6 @@ axiosInstance.interceptors.response.use(
       failedRequests.forEach(pending => pending.resolve());
       
       // Reintentar solicitud original
-      originalRequest.headers.Authorization = `Bearer ${accessToken}`;
       return axiosInstance(originalRequest);
     } catch (refreshError) {
       // Manejar error crítico

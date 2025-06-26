@@ -9,6 +9,8 @@ import { TABLE_STATUS } from '../../utils/constants';
 import { getTableStatusName } from '../../utils/helpers';
 import { showToast } from '../../components/ui/Toast';
 
+import useApi from '../../hooks/useApi';
+
 const Tables = () => {
   const [tables, setTables] = useState([]);
   const [loading, setLoading] = useState(true);

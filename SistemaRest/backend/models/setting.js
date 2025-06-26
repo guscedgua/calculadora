@@ -1,4 +1,6 @@
 // backend/models/Setting.js
+// Modelo para la configuración global del sistema.
+
 import mongoose from 'mongoose';
 
 const settingSchema = new mongoose.Schema({
@@ -19,6 +21,7 @@ const settingSchema = new mongoose.Schema({
 settingSchema.statics.getSettings = async function() {
     let settings = await this.findOne();
     if (!settings) {
+        // Si no existe, crea un documento por defecto con los valores iniciales
         settings = await this.create({ useInventoryModule: false, useRecipeModule: false });
     }
     return settings;

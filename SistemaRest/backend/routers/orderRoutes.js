@@ -13,6 +13,7 @@ import {
 // Importamos los middlewares de autenticación y autorización desde tu archivo auth.js
 import { auth, adminCheck, supervisorCheck, meseroCheck, cocineroCheck } from '../middleware/auth.js';
 import { ROLES } from '../config/roles.js'; // Importamos los roles definidos
+import { getTodaySummary } from '../controllers/orderController.js';
 
 const router = express.Router();
 
@@ -75,5 +76,6 @@ router.delete(
   adminCheck, // Solo permite administrador
   deleteOrder
 );
+router.get('/summary/today', auth, meseroCheck, getTodaySummary);
 
 export default router;

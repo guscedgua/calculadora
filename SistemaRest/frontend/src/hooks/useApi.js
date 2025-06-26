@@ -1,3 +1,4 @@
+// frontend/src/hooks/useApi.js
 import { useState, useCallback, useEffect } from 'react';
 
 const useApi = (apiFunction, { immediate = true, params = {} } = {}) => {
@@ -11,14 +12,15 @@ const useApi = (apiFunction, { immediate = true, params = {} } = {}) => {
       setLoading(true);
       setStatus('pending');
       const result = await apiFunction(...args);
-      setData(result.data);
+      setData(result);
       setError(null);
       setStatus('success');
       return result;
     } catch (err) {
-      setError(err.response?.data?.message || err.message || 'Error desconocido');
+      const errorMessage = err.response?.data?.message || err.message || 'Error desconocido';
+      setError(errorMessage);
       setStatus('error');
-      throw err;
+      throw new Error(errorMessage);
     } finally {
       setLoading(false);
     }

@@ -23,12 +23,33 @@ const RestaurantLogin = () => {
     setSuccess('');
 
     try {
-      await login(email, password);
+      // Recibe la ruta de redirección desde login()
+      const redirectPath = await login(email, password);
+      
       setSuccess('¡Inicio de sesión exitoso! Redirigiendo...');
-      setTimeout(() => navigate('/orders'), 1500);
+      setTimeout(() => navigate(redirectPath), 1500);
     } catch (err) {
-      setError(err.message || 'Error desconocido al iniciar sesión.');
-      console.error('Error en inicio de sesión del componente:', err);
+      // Maneja diferentes tipos de errores
+      let errorMessage = 'Error desconocido al iniciar sesión.';
+      
+      if (err.response) {
+        // Error de respuesta del servidor
+        if (err.response.status === 401) {
+          errorMessage = 'Credenciales inválidas. Verifica tu email y contraseña.';
+        } else if (err.response.status === 500) {
+          errorMessage = 'Error del servidor. Intenta nuevamente más tarde.';
+        } else {
+          errorMessage = `Error ${err.response.status}: ${err.response.data.message || 'Error de autenticación'}`;
+        }
+      } else if (err.request) {
+        // Error de red (sin respuesta del servidor)
+        errorMessage = 'Error de conexión. Verifica tu conexión a internet.';
+      } else {
+        // Error en el código
+        errorMessage = err.message || errorMessage;
+      }
+      
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -36,7 +57,11 @@ const RestaurantLogin = () => {
 
   const togglePasswordVisibility = () => setShowPassword(!showPassword);
 
-  if (loading) return <Spinner />;
+  if (loading) return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-300 to-purple-400">
+      <Spinner size="lg" />
+    </div>
+  );
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-blue-300 to-purple-400">
@@ -44,8 +69,6 @@ const RestaurantLogin = () => {
         {/* Panel Izquierdo - Contenido de marketing/informativo */}
         <div className="lg:w-1/2 p-8 lg:p-12 flex flex-col items-center justify-center bg-white border-b lg:border-r border-gray-100">
           <div className="text-center">
-            {/* Si tienes un logo, podrías ponerlo aquí */}
-            {/* <img src="/path/to/your/logo.png" alt="Restaurant POS Logo" className="mx-auto mb-6 w-24 h-24" /> */}
             <h1 className="text-4xl font-extrabold text-blue-700 mb-4 animate-fadeInDown">
               ¡Bienvenido a <span className="text-purple-600">Restaurante POS</span>!
             </h1>
@@ -87,14 +110,14 @@ const RestaurantLogin = () => {
             {/* Mensajes de error y éxito */}
             {error && (
               <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-4 rounded-md" role="alert">
-                <div className="flex items-center"> {/* Alineación vertical */}
+                <div className="flex items-center">
                   <div className="flex-shrink-0">
                     <svg className="h-5 w-5 text-red-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
                       <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
                     </svg>
                   </div>
                   <div className="ml-3">
-                    <p className="text-sm text-red-700 font-medium">{error}</p> {/* Texto más prominente */}
+                    <p className="text-sm text-red-700 font-medium">{error}</p>
                   </div>
                 </div>
               </div>
@@ -129,7 +152,7 @@ const RestaurantLogin = () => {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
-                    className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-purple-500 focus:border-purple-500 sm:text-sm transition-colors duration-200" // Añadido focus-ring y transition
+                    className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-purple-500 focus:border-purple-500 sm:text-sm transition-colors duration-200"
                     placeholder="tu@ejemplo.com"
                   />
                 </div>
@@ -148,15 +171,15 @@ const RestaurantLogin = () => {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
-                    className="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-purple-500 focus:border-purple-500 sm:text-sm transition-colors duration-200" // Añadido focus-ring y transition
+                    className="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-purple-500 focus:border-purple-500 sm:text-sm transition-colors duration-200"
                     placeholder="Contraseña"
                   />
                   <div className="absolute inset-y-0 right-0 pr-3 flex items-center cursor-pointer" onClick={togglePasswordVisibility}>
-                   {showPassword ? (
-                  <FaEyeSlash className="h-5 w-5 text-gray-400 hover:text-gray-600 transition-colors duration-200" />
-                ) : (
-                  <FaEye className="h-5 w-5 text-gray-400 hover:text-gray-600 transition-colors duration-200" />
-                )}
+                    {showPassword ? (
+                      <FaEyeSlash className="h-5 w-5 text-gray-400 hover:text-gray-600 transition-colors duration-200" />
+                    ) : (
+                      <FaEye className="h-5 w-5 text-gray-400 hover:text-gray-600 transition-colors duration-200" />
+                    )}
                   </div>
                 </div>
               </div>
