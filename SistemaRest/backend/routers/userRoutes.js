@@ -1,57 +1,26 @@
-// Archivo: backend/models/User.js
-// Modelo de usuario para la base de datos, incluyendo hash de contraseña.
-import mongoose from 'mongoose';
-import bcrypt from 'bcryptjs';
+// backend/routers/userRoutes.js
+import express from 'express';
+const router = express.Router();
+import {
+  createUser,
+  getUsers,
+  getUserById,
+  updateUser,
+  deleteUser
+} from '../controllers/userController.js';
 
-const userSchema = mongoose.Schema({
-  name: {
-    type: String,
-    required: true,
-  },
-  email: {
-    type: String,
-    required: true,
-    unique: true,
-  },
-  password: {
-    type: String,
-    required: true,
-  },
-  role: {
-    type: String,
-    enum: ['administrador', 'supervisor', 'mesero', 'cocinero', 'cliente'],
-    default: 'cliente',
-  },
-  sessionId: {
-    type: String,
-    unique: true,
-    sparse: true // Permite múltiples documentos sin sessionId o con sessionId duplicado si no se aplica indexación única en producción
-  }
-}, {
-  timestamps: true,
-});
+// Importa tus middlewares de autenticación y autorización
+import { auth, adminCheck, roleCheck } from '../middleware/auth.js';
 
-// Middleware para hashear la contraseña antes de guardar
-userSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) {
-    next();
-  }
-  const salt = await bcrypt.genSalt(10);
-  this.password = await bcrypt.hash(this.password, salt);
-});
+// Rutas para /api/users
+router.route('/')
+  .post(auth, adminCheck, createUser) // Solo admin puede crear usuarios
+  .get(auth, adminCheck, getUsers); // Solo admin puede obtener todos los usuarios
 
-// Método para comparar contraseñas
-userSchema.methods.comparePassword = async function (candidatePassword) {
-  // AGREGADO: Validación para asegurar que candidatePassword no sea undefined
-  if (!candidatePassword) {
-    // Es importante lanzar un error descriptivo aquí, o al menos un log.
-    // Esto es para que el error de bcrypt no sea tan críptico.
-    console.error("Error: Contraseña proporcionada para comparar es undefined o vacía.");
-    throw new Error("La contraseña proporcionada para comparación no puede estar vacía.");
-  }
-  return await bcrypt.compare(candidatePassword, this.password);
-};
+// Rutas para /api/users/:id
+router.route('/:id')
+  .get(auth, roleCheck(['admin', 'supervisor', 'mesero', 'cocinero', 'cliente']), getUserById) // Acceso controlado, el propio usuario o admin/supervisor
+  .put(auth, roleCheck(['admin', 'supervisor', 'mesero', 'cocinero', 'cliente']), updateUser) // Acceso controlado para actualizar (admin o el propio usuario)
+  .delete(auth, adminCheck, deleteUser); // Solo admin puede eliminar usuarios
 
-const User = mongoose.model('User', userSchema);
-
-export default User;
+export default router;

@@ -1,213 +1,580 @@
-// Archivo: backend/controllers/authController.js
-// Lógica para el registro, login, logout y refresco de tokens.
+// backend/controllers/authController.js
 import User from '../models/User.js';
 import RefreshToken from '../models/RefreshToken.js';
 import {
-  generateAccessToken,
-  generateRefreshToken,
-  createSessionId,
-  setAuthCookies
+    generateAccessToken,
+    generateRefreshToken,
+    createSessionId,
 } from '../utils/generateTokens.js';
 import jwt from 'jsonwebtoken';
-import { ROLES } from '../config/roles.js';
+import { ROLES } from '../config/roles.js'; // Asegúrate que este archivo existe y exporta ROLES
 
+/**
+ * @desc Registrar un nuevo usuario
+ * @route POST /api/auth/register
+ * @access Public
+ */
 export const registerUser = async (req, res) => {
-  try {
-    const { name, email, password, role } = req.body;
+    try {
+        const { name, email, password, role } = req.body;
 
-    // Verificar si el usuario ya existe
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: 'El usuario ya existe'
-      });
+        // Validación básica
+        if (!name || !email || !password || !role) {
+            return res.status(400).json({ success: false, message: 'Todos los campos son obligatorios.' });
+        }
+
+        // Validar si el rol es uno de los permitidos (opcional pero recomendado)
+        if (!Object.values(ROLES).includes(role)) {
+            return res.status(400).json({ success: false, message: 'Rol de usuario inválido.' });
+        }
+
+        // Verificar si el usuario ya existe
+        const userExists = await User.findOne({ email });
+        if (userExists) {
+            return res.status(400).json({ success: false, message: 'El usuario ya existe con este correo electrónico.' });
+        }
+
+        // Crear el nuevo usuario
+        const user = await User.create({
+            name,
+            email,
+            password, // El pre-save hook en tu modelo User debería hashear esto automáticamente
+            role
+        });
+
+        // Generar sessionId y tokens como en el login (si quieres que inicie sesión automáticamente)
+        const sessionId = createSessionId();
+        user.sessionId = sessionId; // Asigna el sessionId al usuario
+        await user.save(); // Guarda el usuario con el nuevo sessionId
+
+        const accessToken = generateAccessToken(user, sessionId);
+        const refreshToken = generateRefreshToken(user, sessionId);
+
+        const refreshExpiresDays = parseInt(process.env.JWT_REFRESH_COOKIE_EXPIRE || 7);
+        const expiresAtDb = new Date();
+        expiresAtDb.setDate(expiresAtDb.getDate() + refreshExpiresDays);
+
+        await RefreshToken.create({
+            token: refreshToken,
+            user: user._id,
+            sessionId,
+            expiresAt: expiresAtDb,
+            revoked: false // Establecer explícitamente revoked a false
+        });
+
+        const cookieOptions = {
+            expires: new Date(Date.now() + refreshExpiresDays * 24 * 60 * 60 * 1000),
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax',
+            path: '/'
+        };
+        res.cookie('refreshToken', refreshToken, cookieOptions);
+
+
+        res.status(201).json({
+            success: true,
+            message: 'Usuario registrado exitosamente',
+            accessToken,
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+            },
+        });
+
+    } catch (error) {
+        console.error('Error al registrar usuario:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error en el servidor al registrar usuario',
+            systemError: process.env.NODE_ENV === 'development' ? error.message : 'Error interno del servidor',
+        });
     }
-
-    // Crear nuevo usuario
-    const newUser = new User({
-      name,
-      email,
-      password,
-      role: role || ROLES.CLIENTE // Rol por defecto
-    });
-
-    // Guardar usuario
-    await newUser.save();
-
-    res.status(201).json({
-      success: true,
-      message: 'Usuario registrado exitosamente',
-      user: {
-        id: newUser._id,
-        name: newUser.name,
-        email: newUser.email,
-        role: newUser.role
-      }
-    });
-  } catch (error) {
-    console.error('Register error:', error);
-    if (error.name === 'ValidationError') {
-      const messages = Object.values(error.errors).map(val => val.message);
-      return res.status(400).json({ success: false, message: messages.join(', ') });
-    }
-    res.status(500).json({
-      success: false,
-      message: 'Error en el servidor al registrar usuario',
-      systemError: process.env.NODE_ENV === 'development' ? error.message : null,
-    });
-  }
 };
+
 
 export const login = async (req, res) => {
-  try {
-    const { email, password } = req.body;
+    console.log('--- LOGIN CONTROLLER ---');
+    try {
+        const { email, password } = req.body;
+        console.log('DEBUG Login: Intentando login para email:', email); // Log: email recibido
 
-    // --- INICIO DE LÍNEAS DE DEPURACIÓN (Mantenidas para la próxima verificación) ---
-    console.log('--- INICIO DEPURACIÓN LOGIN ---');
-    console.log('req.body recibido:', req.body);
-    console.log('Email recibido:', email);
-    console.log('Password recibido (de req.body):', password);
-    console.log('--- FIN DEPURACIÓN LOGIN ---');
-    // --- FIN DE LÍNEAS DE DEPURACIÓN ---
+        if (!email || !password) {
+            console.log('DEBUG Login: Email o contraseña faltantes. Status 400.');
+            return res.status(400).json({ success: false, message: "Email y contraseña son requeridos" });
+        }
 
-    // AGREGADO: Validación básica de campos
-    if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: "Email y contraseña son requeridos",
-      });
+        const user = await User.findOne({ email });
+        if (!user) {
+            console.log('DEBUG Login: Usuario no encontrado para email:', email, '. Status 401.'); // Log: usuario no encontrado
+            return res.status(401).json({ success: false, message: 'Credenciales inválidas' });
+        }
+        console.log('DEBUG Login: Usuario encontrado:', user.email); // Log: usuario encontrado
+
+        const isMatch = await user.comparePassword(password);
+        console.log('DEBUG Login: Resultado comparación contraseña (isMatch):', isMatch); // Log: resultado de bcrypt.compare
+        if (!isMatch) {
+            console.log('DEBUG Login: Contraseña incorrecta para usuario:', user.email, '. Status 401.'); // Log: contraseña incorrecta
+            return res.status(401).json({ success: false, message: 'Credenciales inválidas' });
+        }
+        console.log('DEBUG Login: Contraseña correcta para usuario:', user.email);
+
+        const sessionId = createSessionId();
+        user.sessionId = sessionId;
+        await user.save();
+
+        const accessToken = generateAccessToken(user, sessionId);
+        const refreshToken = generateRefreshToken(user, sessionId);
+
+        const refreshExpiresDays = parseInt(process.env.JWT_REFRESH_COOKIE_EXPIRE || 7);
+        const expiresAtDb = new Date();
+        expiresAtDb.setDate(expiresAtDb.getDate() + refreshExpiresDays);
+
+        await RefreshToken.create({
+            token: refreshToken,
+            user: user._id,
+            sessionId,
+            expiresAt: expiresAtDb,
+            revoked: false // Establecer explícitamente revoked a false
+        });
+
+        const cookieOptions = {
+            expires: new Date(Date.now() + refreshExpiresDays * 24 * 60 * 60 * 1000),
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax',
+            path: '/'
+        };
+
+        res.cookie('refreshToken', refreshToken, cookieOptions);
+        console.log('DEBUG Login: Login exitoso. Tokens generados y cookie establecida.');
+
+        res.status(200).json({
+            success: true,
+            message: 'Inicio de sesión exitoso',
+            accessToken,
+            user: {
+                id: user._id,
+                role: user.role,
+                name: user.name,
+                email: user.email
+            }
+        });
+
+    } catch (error) {
+        console.error('Login error (Backend - INESPERADO):', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error en el servidor al iniciar sesión',
+            systemError: process.env.NODE_ENV === 'development' ? error.message : 'Error interno del servidor',
+        });
     }
+};
 
-    // Verificar usuario
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Credenciales inválidas'
-      });
+/**
+ * Middleware para refrescar tokens
+ */
+export const refreshTokenMiddleware = async (req, res) => {
+    console.log('--- REFRESH TOKEN MIDDLEWARE ---');
+    try {
+        // 1. Obtener token de las cookies
+        const storedRefreshToken = req.cookies?.refreshToken;
+        console.log('Refresh Token recibido en cookies:', storedRefreshToken ? 'Sí' : 'No');
+        if (storedRefreshToken) {
+            console.log('Primeros 10 caracteres del Refresh Token:', storedRefreshToken.substring(0, 10) + '...');
+        }
+
+        const commonCookieOptions = {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax',
+            path: '/'
+        };
+
+        if (!storedRefreshToken) {
+            console.log('ERROR: NO_REFRESH_TOKEN - No se encontró el token en las cookies.');
+            return res.status(401).json({
+                success: false,
+                code: 'MISSING_REFRESH_TOKEN',
+                message: 'Refresh token no proporcionado en las cookies.'
+            });
+        }
+
+        // 2. Buscar token en DB con verificación de vigencia y que no esté revocado
+        const storedTokenDoc = await RefreshToken.findOne({
+            token: storedRefreshToken,
+            $or: [ // Manejar documentos antiguos con 'revoked' undefined o false
+                { revoked: false },
+                { revoked: { $exists: false } }
+            ],
+            expiresAt: { $gt: new Date() } // Asegurarse de que no esté expirado
+        }).populate('user');
+
+        // --- NUEVO LOG DE DEPURACIÓN ---
+        console.log('DEBUG: Resultado de RefreshToken.findOne:', storedTokenDoc ? JSON.stringify(storedTokenDoc.toObject(), null, 2) : 'No encontrado');
+        // --- FIN NUEVO LOG ---
+
+        // 3. Manejar token inválido (no encontrado, revocado o expirado en DB)
+        if (!storedTokenDoc) {
+            res.clearCookie('refreshToken', commonCookieOptions);
+            // Registrar detalles para diagnóstico
+            const foundTokenWithoutFilters = await RefreshToken.findOne({ token: storedRefreshToken });
+            console.warn(
+                'ERROR: INVALID_REFRESH_TOKEN_DB - Token no encontrado en DB o no cumple las condiciones.',
+                foundTokenWithoutFilters
+                    ? `Expirado: ${foundTokenWithoutFilters.expiresAt < new Date()} | Revocado: ${foundTokenWithoutFilters.revoked} | Usuario asociado: ${!!foundTokenWithoutFilters.user}`
+                    : 'Token no existe en DB (quizás ya fue eliminado).'
+            );
+            return res.status(401).json({
+                success: false,
+                code: 'INVALID_REFRESH_TOKEN_DB',
+                message: 'Token de refresco inválido o expirado.'
+            });
+        }
+
+        // 4. Verificar usuario asociado (si el populate falló o el usuario fue eliminado)
+        if (!storedTokenDoc.user) {
+            await RefreshToken.deleteOne({ token: storedRefreshToken }); // Eliminar el token si no tiene un usuario válido
+            console.log('ERROR: USER_NOT_FOUND - Usuario asociado al token no existe o fue eliminado. Token de refresco eliminado.');
+            return res.status(401).json({
+                success: false,
+                code: 'USER_NOT_FOUND',
+                message: 'Usuario asociado al token no existe.'
+            });
+        }
+        console.log('Token encontrado en DB. Usuario asociado:', storedTokenDoc.user.email);
+        console.log('Token DB expira en:', storedTokenDoc.expiresAt);
+
+
+        // 5. Validar JWT del refresh token (firma y estructura)
+        let decoded;
+        try {
+            decoded = jwt.verify(storedRefreshToken, process.env.REFRESH_TOKEN_SECRET);
+            console.log('Token JWT verificado. Decodificado ID:', decoded.id, 'SessionId:', decoded.sessionId);
+        } catch (verifyError) {
+            console.error('Error verificando refresh token (JWT):', verifyError.name, verifyError.message);
+            // Si el JWT es inválido, revocamos el token en la DB
+            await RefreshToken.updateOne(
+                { token: storedRefreshToken },
+                { revoked: true }
+            );
+            res.clearCookie('refreshToken', commonCookieOptions); // Limpiar la cookie también
+            return res.status(401).json({
+                success: false,
+                code: 'INVALID_REFRESH_TOKEN_JWT_VERIFICATION',
+                message: 'Token de refresco inválido (firma o formato incorrecto).'
+            });
+        }
+
+        // 6. Verificar coincidencia de sessionId (protección contra secuestro de sesión)
+        if (storedTokenDoc.sessionId !== decoded.sessionId) {
+            // Si hay un mismatch de sesión, revocar el token
+            await RefreshToken.updateOne(
+                { token: storedRefreshToken },
+                { revoked: true }
+            );
+            res.clearCookie('refreshToken', commonCookieOptions); // Limpiar la cookie también
+            console.log('ERROR: SESSION_MISMATCH - Mismatch de ID de sesión. Token de refresco revocado.');
+            return res.status(401).json({
+                success: false,
+                code: 'SESSION_MISMATCH',
+                message: 'Sesión inválida o terminada. Posible intento de secuestro.'
+            });
+        }
+        console.log('Validación de ID de usuario/sesión exitosa.');
+
+        // 7. Generar nuevos tokens
+        const newAccessToken = generateAccessToken(storedTokenDoc.user, storedTokenDoc.sessionId);
+        const newRefreshToken = generateRefreshToken(storedTokenDoc.user, storedTokenDoc.sessionId);
+
+        // Rotación segura de tokens: Eliminar el token antiguo de la DB
+        await storedTokenDoc.deleteOne();
+        console.log('Token de refresco antiguo eliminado de la DB.');
+
+        // Crear el nuevo refresh token en la DB
+        const refreshExpiresDays = parseInt(process.env.JWT_REFRESH_COOKIE_EXPIRE || 7);
+        const newExpiresAt = new Date();
+        newExpiresAt.setDate(newExpiresAt.getDate() + refreshExpiresDays);
+
+        await RefreshToken.create({
+            token: newRefreshToken,
+            user: storedTokenDoc.user._id,
+            sessionId: storedTokenDoc.sessionId, // Mantener el mismo sessionId
+            expiresAt: newExpiresAt
+        });
+
+        // Establecer la nueva cookie de refresh token en la respuesta
+        const newCookieOptions = {
+            expires: new Date(Date.now() + refreshExpiresDays * 24 * 60 * 60 * 1000),
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax',
+            path: '/'
+        };
+        res.cookie('refreshToken', newRefreshToken, newCookieOptions);
+        console.log('Nuevos tokens generados y cookie de refresh establecida.');
+
+
+        // Enviar la respuesta con el nuevo access token y la información del usuario
+        res.status(200).json({
+            success: true,
+            message: 'Tokens refrescados exitosamente.',
+            accessToken: newAccessToken,
+            user: {
+                id: storedTokenDoc.user._id,
+                role: storedTokenDoc.user.role,
+                name: storedTokenDoc.user.name,
+                email: storedTokenDoc.user.email,
+            }
+        });
+
+    } catch (error) {
+        console.error('Refresh Token Middleware error INESPERADO:', error);
+        if (!res.headersSent) {
+            res.status(500).json({
+                success: false,
+                code: 'REFRESH_TOKEN_SERVER_ERROR',
+                message: 'Error interno del servidor al refrescar token.'
+            });
+        }
     }
+};
 
-    // Verificar contraseña
-    const isMatch = await user.comparePassword(password); // Línea 76
-    if (!isMatch) {
-      return res.status(401).json({
-        success: false,
-        message: 'Credenciales inválidas'
-      });
+/**
+ * Middleware de autenticación principal
+ * Exportado como 'auth'
+ */
+export const auth = async (req, res, next) => {
+    console.log('--- AUTH MIDDLEWARE ---');
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader) {
+            console.log('DEBUG Auth: No Authorization header provided.');
+            return res.status(401).json({
+                success: false,
+                code: 'MISSING_TOKEN',
+                message: 'Token de autenticación no proporcionado'
+            });
+        }
+
+        const tokenParts = authHeader.split(' ');
+        let token;
+        if (tokenParts.length === 2 && tokenParts[0].toLowerCase() === 'bearer') {
+            token = tokenParts[1];
+        } else if (tokenParts.length === 1) {
+            token = tokenParts[0];
+        } else {
+            console.log('DEBUG Auth: Invalid token format.');
+            return res.status(401).json({
+                success: false,
+                code: 'INVALID_TOKEN_FORMAT',
+                message: 'Formato de token inválido'
+            });
+        }
+
+        if (!token) {
+            console.log('DEBUG Auth: Empty token.');
+            return res.status(401).json({
+                success: false,
+                code: 'EMPTY_TOKEN',
+                message: 'Token de autenticación vacío'
+            });
+        }
+
+        let decoded;
+        try {
+            decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+            console.log('DEBUG Auth: Access Token verificado. Decodificado ID:', decoded.id, 'SessionId:', decoded.sessionId);
+        } catch (verifyError) {
+            if (verifyError.name === 'TokenExpiredError') {
+                console.log('DEBUG Auth: Access Token expirado, intentando refrescar...');
+                return refreshTokenMiddleware(req, res);
+            }
+
+            if (verifyError.name === 'JsonWebTokenError') {
+                console.log('DEBUG Auth: Invalid JWT (JsonWebTokenError):', verifyError.message);
+                return res.status(401).json({
+                    success: false,
+                    code: 'INVALID_TOKEN',
+                    message: 'Token de autenticación inválido'
+                });
+            }
+
+            console.error('DEBUG Auth: Token verification error (unexpected):', verifyError);
+            return res.status(500).json({
+                success: false,
+                code: 'TOKEN_VERIFY_ERROR',
+                message: 'Error en la verificación del token'
+            });
+        }
+
+        const user = await User.findById(decoded.id).select('role sessionId email name');
+
+        if (!user) {
+            console.log('DEBUG Auth: User not found for decoded ID:', decoded.id);
+            return res.status(401).json({
+                success: false,
+                code: 'USER_NOT_FOUND',
+                message: 'Usuario asociado al token no existe'
+            });
+        }
+
+        req.sessionId = decoded.sessionId;
+
+        if (user.sessionId !== decoded.sessionId) {
+            console.log('DEBUG Auth: Session ID mismatch. User sessionId:', user.sessionId, 'Decoded sessionId:', decoded.sessionId);
+            return res.status(401).json({
+                success: false,
+                code: 'INVALID_SESSION',
+                message: 'Sesión inválida o terminada'
+            });
+        }
+
+        req.user = {
+            id: user._id,
+            role: user.role,
+            name: user.name,
+            email: user.email
+        };
+        console.log('DEBUG Auth: Usuario autenticado y autorizado:', req.user.email, 'Rol:', req.user.role);
+
+        next();
+    } catch (error) {
+        console.error('Auth Middleware error (unexpected):', error);
+        if (!res.headersSent) {
+            res.status(500).json({
+                success: false,
+                code: 'SERVER_ERROR',
+                message: 'Error interno del servidor'
+            });
+        }
     }
+};
 
-    // Crear nueva sesión para el usuario
-    const sessionId = createSessionId();
-    user.sessionId = sessionId;
-    await user.save();
+/**
+ * Middleware para verificar roles
+ */
+export const roleCheck = (allowedRoles = []) => {
+    return (req, res, next) => {
+        if (!req.user) {
+            return res.status(401).json({
+                success: false,
+                code: 'UNAUTHENTICATED',
+                message: 'Usuario no autenticado (no hay datos de usuario en req.user)'
+            });
+        }
 
-    // Generar tokens
-    const accessToken = generateAccessToken(user, sessionId);
-    const refreshToken = generateRefreshToken(user, sessionId);
+        const userRole = req.user.role.toLowerCase();
+        const normalizedAllowedRoles = new Set(allowedRoles.map(r => r.toLowerCase()));
 
-    // Guardar refresh token en la base de datos
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7); // Expira en 7 días
+        console.log(`DEBUG RoleCheck: Usuario con rol '${userRole}' intentando acceder. Roles permitidos: [${Array.from(normalizedAllowedRoles).join(', ')}]`);
 
-    await RefreshToken.create({
-      token: refreshToken,
-      user: user._id,
-      sessionId,
-      expiresAt
-    });
+        if (normalizedAllowedRoles.has(userRole)) {
+            return next();
+        }
 
-    // Establecer cookies de autenticación
-    setAuthCookies(res, { accessToken, refreshToken }, {
-      id: user._id,
-      role: user.role,
-      name: user.name,
-      email: user.email
-    });
+        res.status(403).json({
+            success: false,
+            code: 'UNAUTHORIZED_ROLE',
+            message: `Acceso denegado. Rol '${req.user.role}' no tiene permiso.`,
+            requiredRoles: allowedRoles
+        });
+    };
+};
 
-    // Preparar la respuesta JSON
-    const responsePayload = {
-      success: true,
-      message: 'Inicio de sesión exitoso',
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role
-      },
-      accessToken: accessToken
+// Middlewares específicos por rol
+export const adminCheck = roleCheck([ROLES.ADMIN]);
+export const supervisorCheck = roleCheck([ROLES.ADMIN, ROLES.SUPERVISOR]);
+export const meseroCheck = roleCheck([ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.MESERO]);
+export const cocineroCheck = roleCheck([ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.COCINERO]);
+export const staffCheck = roleCheck([ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.MESERO, ROLES.COCINERO]);
+export const clientCheck = roleCheck([ROLES.CLIENTE]);
+
+
+/**
+ * @desc Obtener el perfil del usuario autenticado
+ * @route GET /api/auth/profile
+ * @access Private
+ */
+export const getProfile = async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(404).json({ success: false, message: 'Usuario no encontrado en la solicitud.' });
+        }
+        res.status(200).json({
+            success: true,
+            user: req.user
+        });
+    } catch (error) {
+        console.error('Error al obtener perfil:', error);
+        res.status(500).json({ success: false, message: 'Error interno del servidor al obtener perfil.' });
+    }
+};
+
+/**
+ * @desc Cerrar sesión de la sesión actual
+ * @route POST /api/auth/logout
+ * @access Private
+ */
+export const logout = async (req, res) => {
+    const commonCookieOptions = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax',
+        path: '/'
     };
 
-    // SI EL USUARIO ES UN ADMINISTRADOR, INCLUIR EL ACCESSTOKEN EN EL CUERPO DE LA RESPUESTA
-    if (user.role === 'admin' || user.role === ROLES.ADMIN) {
-      responsePayload.accessToken = accessToken;
+    if (!req.user || !req.user.id || !req.sessionId) {
+        res.clearCookie('refreshToken', commonCookieOptions);
+        return res.status(200).json({ success: true, message: 'Sesión cerrada (sin información de usuario/sesión válida para revocar).' });
     }
 
-    res.json(responsePayload);
-  } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error en el servidor al iniciar sesión',
-      systemError: process.env.NODE_ENV === 'development' ? error.message : null,
-    });
-  }
+    try {
+        await RefreshToken.findOneAndUpdate(
+            { user: req.user.id, sessionId: req.sessionId, revoked: false },
+            { revoked: true }
+        );
+
+        res.clearCookie('refreshToken', commonCookieOptions);
+
+        res.status(200).json({ success: true, message: 'Sesión cerrada exitosamente.' });
+    } catch (error) {
+        console.error('Error al cerrar sesión:', error);
+        res.status(500).json({ success: false, message: 'Error interno del servidor al cerrar sesión.' });
+    }
 };
 
-export const logout = async (req, res) => {
-  try {
-    const sessionId = req.user?.sessionId; // Obtener sessionId del usuario autenticado
+/**
+ * @desc Cerrar sesión de todas las sesiones de un usuario
+ * @route POST /api/auth/logoutAll
+ * @access Private (solo ADMIN o el propio usuario si tiene permiso)
+ */
+export const logoutAllSessions = async (req, res) => {
+    const commonCookieOptions = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax',
+        path: '/'
+    };
 
-    if (sessionId) {
-      // Revocar todos los tokens de refresco asociados a la sesión actual del usuario
-      await RefreshToken.updateMany(
-        { sessionId, user: req.user.id, revoked: false },
-        { $set: { revoked: true } }
-      );
-      // Opcional: También podrías limpiar el sessionId del usuario en el modelo User
-      // await User.findByIdAndUpdate(req.user.id, { $unset: { sessionId: 1 } });
+    if (!req.user || !req.user.id) {
+        res.clearCookie('refreshToken', commonCookieOptions);
+        return res.status(401).json({ success: false, message: 'No autenticado para realizar esta acción.' });
     }
 
-    // Limpiar cookies de autenticación
-    res.clearCookie('accessToken', { path: '/' });
-    res.clearCookie('refreshToken', { path: '/api/auth/refresh-token' });
-    res.clearCookie('user', { path: '/' }); // Limpiar la cookie de información de usuario
+    try {
+        await RefreshToken.updateMany(
+            { user: req.user.id, revoked: false },
+            { revoked: true }
+        );
 
-    res.json({ success: true, message: 'Sesión cerrada exitosamente' });
-  } catch (error) {
-    console.error('Logout error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error en el servidor al cerrar sesión',
-      systemError: process.env.NODE_ENV === 'development' ? error.message : null,
-    });
-  }
-};
+        res.clearCookie('refreshToken', commonCookieOptions);
 
-// Función para obtener el perfil del usuario autenticado
-export const getProfile = async (req, res) => { // <<-- ¡AQUÍ ESTÁ LA EXPORTACIÓN DE 'getProfile'!
-  try {
-    // El usuario ya está autenticado por el middleware `protect` y está disponible en `req.user`
-    const user = await User.findById(req.user.id).select('-password'); // Excluir la contraseña
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'Usuario no encontrado (perfil no disponible).'
-      });
+        res.status(200).json({ success: true, message: 'Todas las sesiones han sido cerradas.' });
+    } catch (error) {
+        console.error('Error al cerrar todas las sesiones:', error);
+        res.status(500).json({ success: false, message: 'Error interno del servidor al cerrar todas las sesiones.' });
     }
-
-    res.json({
-      success: true,
-      message: 'Perfil de usuario obtenido exitosamente.',
-      user
-    });
-  } catch (error) {
-    console.error('Error al obtener perfil:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error del servidor al obtener el perfil de usuario.',
-      systemError: process.env.NODE_ENV === 'development' ? error.message : null,
-    });
-  }
 };

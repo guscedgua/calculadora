@@ -1,4 +1,4 @@
-/// backend/models/RefreshToken.js
+// backend/models/RefreshToken.js
 import mongoose from 'mongoose';
 
 const refreshTokenSchema = mongoose.Schema(
@@ -20,6 +20,12 @@ const refreshTokenSchema = mongoose.Schema(
     expiresAt: {
       type: Date,
       required: true,
+    },
+    // --- CORRECCIÓN CLAVE: Añadir el campo 'revoked' ---
+    revoked: {
+      type: Boolean,
+      default: false, // Valor por defecto a false
+      required: true // Hace que el campo sea obligatorio y siempre tenga un valor
     },
   },
   {

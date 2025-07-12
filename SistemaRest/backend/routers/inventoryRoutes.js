@@ -1,6 +1,5 @@
-// backend/routes/inventoryRoutes.js
-import express from 'express'; // Usar import si tu proyecto es 'type: module'
-// const express = require('express'); // Usar require si tu proyecto es CJS
+// backend/routers/inventoryRoutes.js
+import express from 'express';
 const router = express.Router();
 import {
     getAllInventoryItems,
@@ -10,30 +9,48 @@ import {
     deleteInventoryItem,
     addInventoryQuantity,
     removeInventoryQuantity
-} from '../controllers/inventoryController.js'; // Asegúrate de la extensión .js
+} from '../controllers/inventoryController.js';
 
-// Middleware de protección (ejemplo, DEBES implementar el tuyo)
-// const protect = (req, res, next) => { /* Tu lógica de autenticación */ next(); };
-// const authorize = (roles) => (req, res, next) => { /* Tu lógica de autorización */ next(); };
+// Importa tus middlewares de autenticación y autorización
+import { auth, roleCheck, adminCheck } from '../middleware/auth.js';
 
-// Rutas públicas
-router.get('/', getAllInventoryItems);
-router.get('/:id', getInventoryItemById);
+// Rutas protegidas para la gestión de inventario
 
-// Rutas protegidas por admin (ejemplo, reemplaza con tu middleware real)
-// router.post('/', protect, authorize(['admin']), createInventoryItem);
-// router.put('/:id', protect, authorize(['admin']), updateInventoryItem);
-// router.delete('/:id', protect, authorize(['admin']), deleteInventoryItem);
-// router.patch('/:id/add', protect, authorize(['admin']), addInventoryQuantity);
-// router.patch('/:id/remove', protect, authorize(['admin']), removeInventoryQuantity);
+// @desc    Crear un nuevo ítem de inventario
+// @route   POST /api/inventory
+// @access  Private (admin)
+router.post('/', auth, adminCheck, createInventoryItem);
 
-// Si aún no tienes auth, para probar puedes usarlas así (SOLO PARA DESARROLLO)
-router.post('/', createInventoryItem);
-router.put('/:id', updateInventoryItem);
-router.delete('/:id', deleteInventoryItem);
-router.patch('/:id/add', addInventoryQuantity);
-router.patch('/:id/remove', removeInventoryQuantity);
+// @desc    Obtener todos los ítems de inventario
+// @route   GET /api/inventory
+// @access  Private (admin, supervisor, cocinero)
+router.get('/', auth, roleCheck(['admin', 'supervisor', 'cocinero']), getAllInventoryItems);
 
+// @desc    Obtener un ítem de inventario por ID
+// @route   GET /api/inventory/:itemId
+// @access  Private (admin, supervisor, cocinero)
+router.get('/:itemId', auth, roleCheck(['admin', 'supervisor', 'cocinero']), getInventoryItemById);
 
-export default router; // Usar export default si tu proyecto es 'type: module'
-// module.exports = router; // Usar module.exports si tu proyecto es CJS
+// @desc    Actualizar un ítem de inventario por ID
+// @route   PUT /api/inventory/:itemId
+// @access  Private (admin)
+router.put('/:itemId', auth, adminCheck, updateInventoryItem);
+
+// @desc    Eliminar un ítem de inventario por ID
+// @route   DELETE /api/inventory/:itemId
+// @access  Private (admin)
+router.delete('/:itemId', auth, adminCheck, deleteInventoryItem);
+
+// @desc    Añadir cantidad a un ítem de inventario
+// @route   PATCH /api/inventory/:itemId/add
+// @access  Private (admin, supervisor)
+router.patch('/:itemId/add', auth, roleCheck(['admin', 'supervisor']), addInventoryQuantity);
+
+// @desc    Remover cantidad de un ítem de inventario
+// @route   PATCH /api/inventory/:itemId/remove
+// @access  Private (admin, supervisor)
+router.patch('/:itemId/remove', auth, roleCheck(['admin', 'supervisor']), removeInventoryQuantity);
+
+// Asegúrate de que tu inventoryController.js también espere 'itemId' en req.params
+// Por ejemplo, en tu controlador: const { itemId } = req.params;
+export default router;

@@ -1,11 +1,11 @@
 // backend/routers/productRoutes.js
 import express from 'express';
 import {
-  createProduct,
-  getProducts,
-  getProductById,
-  updateProduct,
-  deleteProduct
+    createProduct,
+    getProducts,
+    getProductById,
+    updateProduct,
+    deleteProduct
 } from '../controllers/productController.js';
 import { auth, adminCheck, roleCheck } from '../middleware/auth.js'; // Asegúrate de que las importaciones de middleware sean correctas
 

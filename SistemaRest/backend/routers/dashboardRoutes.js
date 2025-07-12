@@ -55,4 +55,4 @@ router.get(
     getTablesStatusSummary
 );
 
-export default router;
+export default router; 

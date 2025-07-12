@@ -1,4 +1,4 @@
-// backend/routes/supplierRoutes.js
+// backend/routers/supplierRoutes.js
 import express from 'express';
 const router = express.Router();
 import {
@@ -9,14 +9,21 @@ import {
     deleteSupplier
 } from '../controllers/supplierController.js';
 
-// Aquí iría tu middleware de autenticación y autorización, por ejemplo:
-// import { protect, authorize } from '../middleware/authMiddleware.js';
+// Importa tus middlewares de autenticación y autorización
+import { auth, adminCheck, roleCheck } from '../middleware/auth.js';
 
-// Para propósitos de prueba inicial en desarrollo, los exponemos directamente:
-router.route('/').get(getAllSuppliers).post(createSupplier);
-router.route('/:id').get(getSupplierById).put(updateSupplier).delete(deleteSupplier);
+// Rutas para /api/suppliers
+router.route('/')
+    .get(auth, roleCheck(['admin', 'supervisor']), getAllSuppliers) // Acceso controlado para ver proveedores
+    .post(auth, adminCheck, createSupplier); // Solo admin puede crear proveedores
 
-// Si implementas auth, sería así:
-// router.route('/').get(protect, authorize(['admin']), getAllSuppliers).post(protect, authorize(['admin']), createSupplier);
-// router.route('/:id').get(protect, authorize(['admin']), getSupplierById).put(protect, authorize(['admin']), updateSupplier).delete(protect, authorize(['admin']), deleteSupplier);
+// Rutas para /api/suppliers/:supplierId
+router.route('/:supplierId')
+    .get(auth, roleCheck(['admin', 'supervisor']), getSupplierById) // Acceso controlado
+    .put(auth, adminCheck, updateSupplier) // Solo admin puede actualizar
+    .delete(auth, adminCheck, deleteSupplier); // Solo admin puede eliminar
+
+// Asegúrate de que tu supplierController.js también espere 'supplierId' en req.params
+// Por ejemplo, en tu controlador: const { supplierId } = req.params;
+
 export default router;
